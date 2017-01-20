@@ -28,22 +28,7 @@ class PhotoStore {
 		return URLSession(configuration: config)
 	}()
 	
-	func fetchInterestingPhotos(completion: @escaping (PhotosResult) -> Void) {
-
-		let url = FlickrAPI.interestingPhotosURL
-		let request = URLRequest(url: url)
-		let task = session.dataTask(with: request) {
-			(data, response, error) -> Void in
-			let result = self.processPhotosRequest(data: data, error: error)
-			OperationQueue.main.addOperation {
-				completion(result)
-			}
-
-		}
-		task.resume()
-	}
-	
-	func fetchPhotos(method: Method, completion: @escaping (PhotosResult) -> Void) {
+	func fetchPhotos(_ method: Method, completion: @escaping (PhotosResult) -> Void) {
 		let url = FlickrAPI.photosURL(method)
 		let request = URLRequest(url: url)
 		let task = session.dataTask(with: request) {
