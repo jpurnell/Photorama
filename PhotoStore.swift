@@ -23,6 +23,11 @@ enum PhotosResult {
 	case failure(Error)
 }
 
+enum TagsResult {
+	case success([Tag])
+	case failure(Error)
+}
+
 class PhotoStore {
 	
 	let imageStore = ImageStore()
@@ -47,20 +52,49 @@ class PhotoStore {
 		let request = URLRequest(url: url)
 		let task = session.dataTask(with: request) {
 			(data, response, error) -> Void in
-			let result = self.processPhotosRequest(data: data, error: error)
-			OperationQueue.main.addOperation {
-				completion(result)
+			
+			self.processPhotosRequest(data: data, error: error) {
+				(result) in
+				
+				OperationQueue.main.addOperation {
+					completion(result)
+				}
 			}
 		}
 		task.resume()
 	}
 	
-	private func processPhotosRequest(data: Data?, error: Error?) -> PhotosResult {
+	private func processPhotosRequest(data: Data?,
+	                                  error: Error?,
+	                                  completion: @escaping (PhotosResult) -> Void) {
 		guard let jsonData = data else {
-			return .failure(error!)
+			completion(.failure(error!))
+			return
 		}
-		return FlickrAPI.photos(fromJSON: jsonData,
-		                        into: persistentContainer.viewContext)
+		persistentContainer.performBackgroundTask {
+			(context) in
+			
+			let result = FlickrAPI.photos(fromJSON: jsonData, into: context)
+			
+			do {
+				try context.save()
+			} catch {
+				print("Error saving to Core Data: \(error).")
+				completion(.failure(error))
+				return
+			}
+			
+			switch result {
+			case let .success(photos):
+				let photoIDs = photos.map { return $0.objectID }
+				let viewContext = self.persistentContainer.viewContext
+				let viewContextPhotos =
+					photoIDs.map { return viewContext.object(with: $0) } as! [Photo]
+				completion(.success(viewContextPhotos))
+			case .failure:
+				completion(result)
+			}
+		}
 	}
 	
 	func fetchImage(for photo: Photo, completion: @escaping (ImageResult) -> Void) {
@@ -109,5 +143,41 @@ class PhotoStore {
 				}
 		}
 		return .success(image)
+	}
+	//MARK: Fetch Methods for Photos
+	
+	func fetchAllPhotos(completion: @escaping (PhotosResult) -> Void) {
+		let fetchRequest: NSFetchRequest<Photo> = Photo.fetchRequest()
+		let sortByDateTaken = NSSortDescriptor(key: #keyPath(Photo.dateTaken),
+		                                       ascending: true)
+		fetchRequest.sortDescriptors = [sortByDateTaken]
+		
+		let viewContext = persistentContainer.viewContext
+		viewContext.perform {
+			do {
+				let allPhotos = try viewContext.fetch(fetchRequest)
+				completion(.success(allPhotos))
+			} catch {
+				completion(.failure(error))
+			}
+		}
+	}
+	
+	//MARK: - Fetch Methods for Tags
+	
+	func fetchAllTags(completion: @escaping (TagsResult) -> Void) {
+		let fetchRequest: NSFetchRequest<Tag> = Tag.fetchRequest()
+		let sortByName = NSSortDescriptor(key: #keyPath(Tag.name), ascending: true)
+		fetchRequest.sortDescriptors = [sortByName]
+		
+		let viewContext = persistentContainer.viewContext
+		viewContext.perform {
+			do {
+				let allTags = try fetchRequest.execute()
+				completion(.success(allTags))
+			} catch {
+				completion(.failure(error))
+			}
+		}
 	}
 }
